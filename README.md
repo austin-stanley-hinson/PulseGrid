@@ -15,13 +15,13 @@ PulseGrid is a distributed event monitoring platform inspired by tools like Data
 
 ## Tech Stack
 
-**Frontend:** Next.js, TypeScript, Tailwind
-**Backend:** FastAPI, Python
-**Database:** PostgreSQL
-**Cache:** Redis
-**Streaming:** Kafka
-**Infrastructure:** Docker, AWS
-**Monitoring:** Prometheus, Grafana
+- **Frontend:** Next.js, TypeScript, Tailwind
+- **Backend:** FastAPI, Python
+- **Database:** PostgreSQL
+- **Cache:** Redis
+- **Streaming:** Kafka
+- **Infrastructure:** Docker, AWS
+- **Monitoring:** Prometheus, Grafana
 
 ## Project Structure
 
