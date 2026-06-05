@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/pulsegrid-logo.png" alt="PulseGrid Logo" width="300"/>
+</p>
+
 # PulseGrid
 
 PulseGrid is a distributed event monitoring platform inspired by tools like Datadog. It collects server metrics from lightweight agents, sends them to a backend API, stores historical data, and displays real-time system health on a dashboard.
