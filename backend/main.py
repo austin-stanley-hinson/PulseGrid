@@ -1,44 +1,71 @@
-import time 
-import socket 
 from datetime import datetime
- 
-import psutil 
-import requests
 
-BACKEND_URL - "https://127.0.0.1:8000/metrics"
-AGENT_ID = "austin-macbook"
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-def collect_metrics():
-    cpu_percent = psutil.cpu_percent(interval=1)
-    memory = psutil.virtual_memory()
+
+# FastAPI application setup for the PulseGrid backend service.
+app = FastAPI(title="PulseGrid Backend")
+
+
+class MetricPayload(BaseModel):
+    """Schema for metrics sent by each PulseGrid agent."""
+
+    # Stable identifier for the agent process or machine.
+    agent_id: str
+    # Hostname of the machine where the agent is running.
+    hostname: str
+    # CPU usage percentage sampled by the agent.
+    cpu_percent: float
+    # Memory usage percentage sampled by the agent.
+    memory_percent: float
+    # Absolute memory usage in bytes.
+    memory_used: int
+    # Total system memory in bytes.
+    memory_total: int
+    # ISO timestamp of when the metric snapshot was created.
+    timestamp: datetime
+
+
+# In-memory store used for local development and simple demos.
+# Note: data resets whenever the backend process restarts.
+received_metrics = []
+
+
+@app.get("/")
+def root():
+    """Health check route that confirms the backend is running."""
 
     return {
-        "agent_id": AGENT_ID,
-        "hostname": socket.gethostname(),
-        "cpu_percent": cpu_percent,
-        "memory_used": memory.used,
-        "memory_total": memory.total, 
-        "time_stamp": datetime.now().isoformat(),
+        "message": "PulseGrid backend is running"
     }
 
-def send_metrics(metrics):
-    response = requests.post(BACKEND_URL, json=metrics, timeout=5)
 
-    if response.status_code == 200:
-        print("Metric sent successfully: ")
-        print(response.json())
-    else:
-        print("Failed to send metric: ")
-        print(response.status_code)
-        print(response.text)
+@app.post("/metrics")
+def receive_metrics(payload: MetricPayload):
+    """Ingest a metric payload from an agent and store it in memory."""
 
-def main():
-    print("PulseGrid agent check started...")
+    # Keep each payload so the dashboard and API can show recent activity.
+    received_metrics.append(payload)
 
-    while True:
-        metrics = collect_metrics()
-        send_metrics(metrics)
-        time.sleep(5)
+    # Console output makes it easy to verify ingestion during development.
+    print("Received metric:")
+    print(payload)
 
-if __name__ == "__main__":
-    main()
+    return {
+        "status": "received",
+        "agent_id": payload.agent_id,
+        "hostname": payload.hostname,
+        "cpu_percent": payload.cpu_percent,
+        "memory_percent": payload.memory_percent,
+    }
+
+
+@app.get("/metrics")
+def get_metrics():
+    """Return all received metrics and a total count."""
+
+    return {
+        "count": len(received_metrics),
+        "metrics": received_metrics
+    }
