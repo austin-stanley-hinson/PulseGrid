@@ -1,40 +1,46 @@
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel
+from sqlmodel import Session, select
+
+from database import create_db_and_tables, get_session
+from models import Metric
 
 
-# FastAPI application setup for the PulseGrid backend service.
 app = FastAPI(title="PulseGrid Backend")
 
 
 class MetricPayload(BaseModel):
-    """Schema for metrics sent by each PulseGrid agent."""
+    """
+    Expected JSON structure for metrics sent by an agent.
+    FastAPI uses this model to validate incoming request bodies.
+    """
 
-    # Stable identifier for the agent process or machine.
     agent_id: str
-    # Hostname of the machine where the agent is running.
     hostname: str
-    # CPU usage percentage sampled by the agent.
     cpu_percent: float
-    # Memory usage percentage sampled by the agent.
     memory_percent: float
-    # Absolute memory usage in bytes.
     memory_used: int
-    # Total system memory in bytes.
     memory_total: int
-    # ISO timestamp of when the metric snapshot was created.
     timestamp: datetime
 
 
-# In-memory store used for local development and simple demos.
-# Note: data resets whenever the backend process restarts.
-received_metrics = []
+@app.on_event("startup")
+def on_startup():
+    """
+    Runs when the backend starts.
+
+    Creates database tables if they do not already exist.
+    """
+    create_db_and_tables()
 
 
 @app.get("/")
 def root():
-    """Health check route that confirms the backend is running."""
+    """
+    Basic health check route to confirm the backend is running.
+    """
 
     return {
         "message": "PulseGrid backend is running"
@@ -42,30 +48,51 @@ def root():
 
 
 @app.post("/metrics")
-def receive_metrics(payload: MetricPayload):
-    """Ingest a metric payload from an agent and store it in memory."""
+def receive_metrics(
+    payload: MetricPayload,
+    session: Session = Depends(get_session)
+):
+    """
+    Receive metric data from an agent, validate it, and store it in PostgreSQL.
+    """
 
-    # Keep each payload so the dashboard and API can show recent activity.
-    received_metrics.append(payload)
+    metric = Metric(
+        agent_id=payload.agent_id,
+        hostname=payload.hostname,
+        cpu_percent=payload.cpu_percent,
+        memory_percent=payload.memory_percent,
+        memory_used=payload.memory_used,
+        memory_total=payload.memory_total,
+        timestamp=payload.timestamp,
+    )
 
-    # Console output makes it easy to verify ingestion during development.
-    print("Received metric:")
-    print(payload)
+    session.add(metric)
+    session.commit()
+    session.refresh(metric)
+
+    print("Stored metric in PostgreSQL:")
+    print(metric)
 
     return {
-        "status": "received",
-        "agent_id": payload.agent_id,
-        "hostname": payload.hostname,
-        "cpu_percent": payload.cpu_percent,
-        "memory_percent": payload.memory_percent,
+        "status": "stored",
+        "metric_id": metric.id,
+        "agent_id": metric.agent_id,
+        "hostname": metric.hostname,
+        "cpu_percent": metric.cpu_percent,
+        "memory_percent": metric.memory_percent,
     }
 
 
 @app.get("/metrics")
-def get_metrics():
-    """Return all received metrics and a total count."""
+def get_metrics(session: Session = Depends(get_session)):
+    """
+    Return recently stored metrics from PostgreSQL.
+    """
+
+    statement = select(Metric).order_by(Metric.id.desc()).limit(20)
+    metrics = session.exec(statement).all()
 
     return {
-        "count": len(received_metrics),
-        "metrics": received_metrics
+        "count": len(metrics),
+        "metrics": metrics,
     }
