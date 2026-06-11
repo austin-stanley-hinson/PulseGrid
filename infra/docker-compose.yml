@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pulsegrid-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: pulsegrid
+      POSTGRES_PASSWORD: pulsegrid
+      POSTGRES_DB: pulsegrid
+    ports:
+      - "5432:5432"
+    volumes:
+      - pulsegrid_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  pulsegrid_postgres_data:
