@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { fetchMetrics } from "@/lib/api"
 import type { Metric } from "@/types/metric"
 
@@ -50,6 +51,13 @@ export default function Dashboard() {
   }, [])
 
   const latest = metrics[0]
+
+  // Reverse so the chart goes oldest → newest left to right
+  const chartData = [...metrics].reverse().map((m) => ({
+    time: new Date(m.timestamp).toLocaleTimeString(),
+    cpu: parseFloat(m.cpu_percent.toFixed(1)),
+    memory: parseFloat(m.memory_percent.toFixed(1)),
+  }))
 
   return (
     <main className="min-h-screen bg-zinc-50 p-8">
@@ -114,6 +122,23 @@ export default function Dashboard() {
           !error && (
             <p className="mb-8 text-sm text-zinc-400">Waiting for agent data...</p>
           )
+        )}
+
+        {/* Historical trends chart */}
+        {chartData.length > 0 && (
+          <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <h2 className="mb-4 font-medium text-zinc-800">Historical Trends</h2>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={chartData}>
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+                <Tooltip formatter={(value) => `${value}%`} />
+                <Legend />
+                <Line type="monotone" dataKey="cpu" stroke="#3b82f6" name="CPU" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="memory" stroke="#f59e0b" name="Memory" dot={false} strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         )}
 
         {/* Recent metrics table */}
