@@ -131,6 +131,8 @@ def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
     Each metric acts like a heartbeat.
     """
 
+    now = datetime.utcnow()
+
     statement = select(Agent).where(Agent.agent_id == payload.agent_id)
     agent = session.exec(statement).first()
 
@@ -139,16 +141,16 @@ def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
             agent_id=payload.agent_id,
             hostname=payload.hostname,
             status="online",
-            last_seen_at=payload.timestamp,
+            registered_at=now,
+            last_seen_at=now,
         )
         session.add(agent)
     else:
         agent.hostname = payload.hostname
         agent.status = "online"
-        agent.last_seen_at = payload.timestamp
+        agent.last_seen_at = now
 
     return agent
-
 
 def create_threshold_alerts(payload: MetricPayload, session: Session) -> list[Alert]:
     """
