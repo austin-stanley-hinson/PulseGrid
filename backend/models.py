@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, Column
 from sqlmodel import Field, SQLModel
 
 
+# Raw metric snapshots reported by agents.
 class Metric(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
