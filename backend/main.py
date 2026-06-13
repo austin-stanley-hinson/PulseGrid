@@ -1,16 +1,16 @@
 from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import create_db_and_tables, get_session
-from models import Metric, Agent, Alert
-
-from fastapi.middleware.cors import CORSMiddleware
+from models import Alert, Agent, Metric
 
 
 app = FastAPI(title="PulseGrid Backend")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 CPU_WARNING_THRESHOLD = 75.0
 CPU_CRITICAL_THRESHOLD = 90.0
 
@@ -32,6 +33,8 @@ MEMORY_WARNING_THRESHOLD = 75.0
 MEMORY_CRITICAL_THRESHOLD = 90.0
 
 OFFLINE_THRESHOLD_SECONDS = 30
+ALERT_COOLDOWN_SECONDS = 300
+
 
 class MetricPayload(BaseModel):
     """
@@ -48,6 +51,135 @@ class MetricPayload(BaseModel):
     timestamp: datetime
 
 
+def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
+    """
+    Create or update an agent row whenever a metric is received.
+
+    Each metric acts like a heartbeat.
+    """
+
+    now = datetime.utcnow()
+
+    statement = select(Agent).where(Agent.agent_id == payload.agent_id)
+    agent = session.exec(statement).first()
+
+    if agent is None:
+        agent = Agent(
+            agent_id=payload.agent_id,
+            hostname=payload.hostname,
+            status="online",
+            registered_at=now,
+            last_seen_at=now,
+        )
+        session.add(agent)
+    else:
+        agent.hostname = payload.hostname
+        agent.status = "online"
+        agent.last_seen_at = now
+
+    return agent
+
+
+def has_recent_alert(
+    agent_id: str,
+    alert_type: str,
+    severity: str,
+    session: Session,
+) -> bool:
+    """
+    Return True if the same agent already has a recent alert
+    of the same type and severity.
+
+    This prevents alert spam when a metric stays above a threshold
+    across multiple agent reports.
+    """
+
+    cooldown_start = datetime.utcnow() - timedelta(seconds=ALERT_COOLDOWN_SECONDS)
+
+    statement = (
+        select(Alert)
+        .where(Alert.agent_id == agent_id)
+        .where(Alert.alert_type == alert_type)
+        .where(Alert.severity == severity)
+        .where(Alert.created_at >= cooldown_start)
+        .order_by(Alert.id.desc())
+    )
+
+    recent_alert = session.exec(statement).first()
+
+    return recent_alert is not None
+
+
+def create_threshold_alerts(payload: MetricPayload, session: Session) -> list[Alert]:
+    """
+    Create warning/critical alerts when CPU or memory crosses thresholds.
+
+    Uses a cooldown window to prevent duplicate alert spam for the same
+    agent, alert type, and severity.
+    """
+
+    alerts = []
+
+    if payload.cpu_percent >= CPU_CRITICAL_THRESHOLD:
+        if not has_recent_alert(payload.agent_id, "cpu", "critical", session):
+            alerts.append(
+                Alert(
+                    agent_id=payload.agent_id,
+                    hostname=payload.hostname,
+                    alert_type="cpu",
+                    severity="critical",
+                    message=f"CPU usage is critically high at {payload.cpu_percent:.1f}%",
+                    value=payload.cpu_percent,
+                    threshold=CPU_CRITICAL_THRESHOLD,
+                )
+            )
+    elif payload.cpu_percent >= CPU_WARNING_THRESHOLD:
+        if not has_recent_alert(payload.agent_id, "cpu", "warning", session):
+            alerts.append(
+                Alert(
+                    agent_id=payload.agent_id,
+                    hostname=payload.hostname,
+                    alert_type="cpu",
+                    severity="warning",
+                    message=f"CPU usage is elevated at {payload.cpu_percent:.1f}%",
+                    value=payload.cpu_percent,
+                    threshold=CPU_WARNING_THRESHOLD,
+                )
+            )
+
+    if payload.memory_percent >= MEMORY_CRITICAL_THRESHOLD:
+        if not has_recent_alert(payload.agent_id, "memory", "critical", session):
+            alerts.append(
+                Alert(
+                    agent_id=payload.agent_id,
+                    hostname=payload.hostname,
+                    alert_type="memory",
+                    severity="critical",
+                    message=f"Memory usage is critically high at {payload.memory_percent:.1f}%",
+                    value=payload.memory_percent,
+                    threshold=MEMORY_CRITICAL_THRESHOLD,
+                )
+            )
+    elif payload.memory_percent >= MEMORY_WARNING_THRESHOLD:
+        if not has_recent_alert(payload.agent_id, "memory", "warning", session):
+            alerts.append(
+                Alert(
+                    agent_id=payload.agent_id,
+                    hostname=payload.hostname,
+                    alert_type="memory",
+                    severity="warning",
+                    message=f"Memory usage is elevated at {payload.memory_percent:.1f}%",
+                    value=payload.memory_percent,
+                    threshold=MEMORY_WARNING_THRESHOLD,
+                )
+            )
+
+    for alert in alerts:
+        session.add(alert)
+
+    return alerts
+
+
 @app.on_event("startup")
 def on_startup():
     """
@@ -55,6 +187,7 @@ def on_startup():
 
     Creates database tables if they do not already exist.
     """
+
     create_db_and_tables()
 
 
@@ -72,7 +205,7 @@ def root():
 @app.post("/metrics")
 def receive_metrics(
     payload: MetricPayload,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
 ):
     """
     Receive metric data from an agent, validate it, store it,
@@ -124,96 +257,6 @@ def get_metrics(session: Session = Depends(get_session)):
         "metrics": metrics,
     }
 
-def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
-    """
-    Create or update an agent row whenever a metric is received.
-
-    Each metric acts like a heartbeat.
-    """
-
-    now = datetime.utcnow()
-
-    statement = select(Agent).where(Agent.agent_id == payload.agent_id)
-    agent = session.exec(statement).first()
-
-    if agent is None:
-        agent = Agent(
-            agent_id=payload.agent_id,
-            hostname=payload.hostname,
-            status="online",
-            registered_at=now,
-            last_seen_at=now,
-        )
-        session.add(agent)
-    else:
-        agent.hostname = payload.hostname
-        agent.status = "online"
-        agent.last_seen_at = now
-
-    return agent
-
-def create_threshold_alerts(payload: MetricPayload, session: Session) -> list[Alert]:
-    """
-    Create warning/critical alerts when CPU or memory crosses thresholds.
-    """
-
-    alerts = []
-
-    if payload.cpu_percent >= CPU_CRITICAL_THRESHOLD:
-        alerts.append(
-            Alert(
-                agent_id=payload.agent_id,
-                hostname=payload.hostname,
-                alert_type="cpu",
-                severity="critical",
-                message=f"CPU usage is critically high at {payload.cpu_percent:.1f}%",
-                value=payload.cpu_percent,
-                threshold=CPU_CRITICAL_THRESHOLD,
-            )
-        )
-    elif payload.cpu_percent >= CPU_WARNING_THRESHOLD:
-        alerts.append(
-            Alert(
-                agent_id=payload.agent_id,
-                hostname=payload.hostname,
-                alert_type="cpu",
-                severity="warning",
-                message=f"CPU usage is elevated at {payload.cpu_percent:.1f}%",
-                value=payload.cpu_percent,
-                threshold=CPU_WARNING_THRESHOLD,
-            )
-        )
-
-    if payload.memory_percent >= MEMORY_CRITICAL_THRESHOLD:
-        alerts.append(
-            Alert(
-                agent_id=payload.agent_id,
-                hostname=payload.hostname,
-                alert_type="memory",
-                severity="critical",
-                message=f"Memory usage is critically high at {payload.memory_percent:.1f}%",
-                value=payload.memory_percent,
-                threshold=MEMORY_CRITICAL_THRESHOLD,
-            )
-        )
-    elif payload.memory_percent >= MEMORY_WARNING_THRESHOLD:
-        alerts.append(
-            Alert(
-                agent_id=payload.agent_id,
-                hostname=payload.hostname,
-                alert_type="memory",
-                severity="warning",
-                message=f"Memory usage is elevated at {payload.memory_percent:.1f}%",
-                value=payload.memory_percent,
-                threshold=MEMORY_WARNING_THRESHOLD,
-            )
-        )
-
-    for alert in alerts:
-        session.add(alert)
-
-    return alerts
-
 
 @app.get("/agents")
 def get_agents(session: Session = Depends(get_session)):
@@ -254,6 +297,7 @@ def get_agents(session: Session = Depends(get_session)):
         "count": len(results),
         "agents": results,
     }
+
 
 @app.get("/alerts")
 def get_alerts(session: Session = Depends(get_session)):
