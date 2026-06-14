@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,7 +59,7 @@ def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
     Each metric acts like a heartbeat.
     """
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     statement = select(Agent).where(Agent.agent_id == payload.agent_id)
     agent = session.exec(statement).first()
@@ -95,7 +95,7 @@ def has_recent_alert(
     across multiple agent reports.
     """
 
-    cooldown_start = datetime.utcnow() - timedelta(seconds=ALERT_COOLDOWN_SECONDS)
+    cooldown_start = datetime.now(timezone.utc) - timedelta(seconds=ALERT_COOLDOWN_SECONDS)
 
     statement = (
         select(Alert)
@@ -258,7 +258,6 @@ def get_metrics(session: Session = Depends(get_session)):
         "metrics": metrics,
     }
 
-
 @app.get("/agents")
 def get_agents(session: Session = Depends(get_session)):
     """
@@ -270,11 +269,18 @@ def get_agents(session: Session = Depends(get_session)):
     statement = select(Agent).order_by(Agent.agent_id)
     agents = session.exec(statement).all()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     results = []
 
     for agent in agents:
-        seconds_since_seen = (now - agent.last_seen_at).total_seconds()
+        last_seen_at = agent.last_seen_at
+
+        # PostgreSQL may return older timestamps without timezone info.
+        # Treat timezone-naive timestamps as UTC so offline detection works safely.
+        if last_seen_at.tzinfo is None:
+            last_seen_at = last_seen_at.replace(tzinfo=timezone.utc)
+
+        seconds_since_seen = (now - last_seen_at).total_seconds()
 
         computed_status = (
             "offline"
@@ -289,7 +295,7 @@ def get_agents(session: Session = Depends(get_session)):
                 "hostname": agent.hostname,
                 "status": computed_status,
                 "registered_at": agent.registered_at,
-                "last_seen_at": agent.last_seen_at,
+                "last_seen_at": last_seen_at,
                 "seconds_since_seen": round(seconds_since_seen, 1),
             }
         )
@@ -299,7 +305,7 @@ def get_agents(session: Session = Depends(get_session)):
         "agents": results,
     }
 
-
+  
 @app.get("/alerts")
 def get_alerts(session: Session = Depends(get_session)):
     """

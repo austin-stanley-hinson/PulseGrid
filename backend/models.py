@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import BigInteger, Column
@@ -18,7 +18,7 @@ class Metric(SQLModel, table=True):
     memory_total: int = Field(sa_column=Column(BigInteger))
 
     timestamp: datetime
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Agent(SQLModel, table=True):
@@ -36,8 +36,8 @@ class Agent(SQLModel, table=True):
 
     status: str = Field(default="online")
 
-    registered_at: datetime = Field(default_factory=datetime.utcnow)
-    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+    registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Alert(SQLModel, table=True):
@@ -57,4 +57,4 @@ class Alert(SQLModel, table=True):
     value: float
     threshold: float
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
