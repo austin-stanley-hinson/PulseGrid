@@ -275,20 +275,6 @@ The PulseGrid dashboard provides:
 
 ---
 
-## Resume Summary
-
-**PulseGrid** is a distributed infrastructure monitoring platform that collects, streams, stores, and visualizes real-time telemetry from monitored services. The system combines lightweight host agents, FastAPI ingestion, Kafka event streaming, PostgreSQL historical storage, Redis latest-state caching, and a Next.js dashboard to model production-style observability platforms.
-
----
-
-## Resume Highlights
-
-* Built a Datadog-inspired observability platform for monitoring distributed services with real-time metrics, logs, alerts, heartbeat tracking, and service health dashboards.
-* Engineered lightweight host agents to collect CPU, memory, disk, network, and service telemetry, transmitting timestamped JSON payloads to a FastAPI ingestion API with schema validation.
-* Designed a scalable event-driven metric pipeline with Kafka for ingestion buffering, PostgreSQL for historical time-series storage, and Redis for latest-state caching and heartbeat tracking.
-* Developed a real-time Next.js dashboard for multi-agent monitoring, historical trend analysis, alert visualization, and offline service detection across monitored nodes.
-
----
 
 ## Extensions / Production-Grade Improvements
 
