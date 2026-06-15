@@ -1,7 +1,9 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI
+from typing import Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -360,15 +362,66 @@ def get_latest_metric(agent_id: str):
 
 
 @app.get("/alerts")
-def get_alerts(session: Session = Depends(get_session)):
+def get_alerts(
+    status: Literal["open", "acknowledged", "resolved", "Resolved"] | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
     """
     Return recent alerts.
     """
 
-    statement = select(Alert).order_by(Alert.id.desc()).limit(50)
+    statement = select(Alert)
+
+    if status is not None:
+        normalized_status = "Resolved" if status == "resolved" else status
+        statement = statement.where(Alert.status == normalized_status)
+
+    statement = statement.order_by(Alert.id.desc()).limit(50)
     alerts = session.exec(statement).all()
 
     return {
         "count": len(alerts),
         "alerts": alerts,
+    }
+
+
+@app.patch("/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(alert_id: int, session: Session = Depends(get_session)):
+    """
+    Mark an alert as acknowledged.
+    """
+
+    alert = session.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "acknowledged"
+    session.add(alert)
+    session.commit()
+    session.refresh(alert)
+
+    return {
+        "status": "updated",
+        "alert": alert,
+    }
+
+
+@app.patch("/alerts/{alert_id}/resolve")
+def resolve_alert(alert_id: int, session: Session = Depends(get_session)):
+    """
+    Mark an alert as resolved.
+    """
+
+    alert = session.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "Resolved"
+    session.add(alert)
+    session.commit()
+    session.refresh(alert)
+
+    return {
+        "status": "updated",
+        "alert": alert,
     }
