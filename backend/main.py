@@ -335,6 +335,30 @@ def get_agents(session: Session = Depends(get_session)):
     }
 
   
+@app.get("/agents/{agent_id}/latest")
+def get_latest_metric(agent_id: str):
+    """
+    Return the latest metric for an agent, read directly from Redis.
+
+    This is much faster than querying PostgreSQL because Redis keeps
+    the data in memory. Used by the dashboard for real-time stat cards.
+    Also checks the heartbeat key to determine if the agent is still alive.
+    """
+
+    raw = redis_client.get(f"agent:{agent_id}:latest")
+
+    if raw is None:
+        return {"error": f"No cached data for agent '{agent_id}'"}
+
+    data = json.loads(raw)
+
+    # If heartbeat key is gone, the agent hasn't reported in 30 seconds
+    heartbeat = redis_client.get(f"agent:{agent_id}:heartbeat")
+    data["online"] = heartbeat is not None
+
+    return data
+
+
 @app.get("/alerts")
 def get_alerts(session: Session = Depends(get_session)):
     """
