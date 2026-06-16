@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI
@@ -7,6 +8,7 @@ from sqlmodel import Session, select
 
 from database import create_db_and_tables, get_session
 from models import Alert, Agent, Metric
+from redis_client import redis_client
 
 
 app = FastAPI(title="PulseGrid Backend")
@@ -50,6 +52,32 @@ class MetricPayload(BaseModel):
     memory_used: int
     memory_total: int
     timestamp: datetime
+
+
+def cache_latest_metric(payload: MetricPayload) -> None:
+    """
+    Store the latest metric for an agent in Redis.
+
+    Two keys are written:
+    - agent:{id}:latest  — full metric snapshot, no expiry (always readable)
+    - agent:{id}:heartbeat — expires after 30s so we can detect offline agents
+    """
+
+    data = {
+        "agent_id": payload.agent_id,
+        "hostname": payload.hostname,
+        "cpu_percent": payload.cpu_percent,
+        "memory_percent": payload.memory_percent,
+        "memory_used": payload.memory_used,
+        "memory_total": payload.memory_total,
+        "timestamp": payload.timestamp.isoformat(),
+    }
+
+    # Store latest metric — no TTL, always keep the last known value
+    redis_client.set(f"agent:{payload.agent_id}:latest", json.dumps(data))
+
+    # Heartbeat key expires after 30 seconds — if agent stops reporting, key disappears
+    redis_client.setex(f"agent:{payload.agent_id}:heartbeat", 30, "alive")
 
 
 def upsert_agent(payload: MetricPayload, session: Session) -> Agent:
@@ -227,6 +255,7 @@ def receive_metrics(
 
     agent = upsert_agent(payload, session)
     alerts = create_threshold_alerts(payload, session)
+    cache_latest_metric(payload)
 
     session.commit()
     session.refresh(metric)
