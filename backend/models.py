@@ -52,6 +52,7 @@ class Alert(SQLModel, table=True):
 
     alert_type: str
     severity: str
+    status: str = Field(default="open")
     message: str
 
     value: float
